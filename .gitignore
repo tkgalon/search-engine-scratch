@@ -1,4 +1,11 @@
 __pycache__/
 *.pyc
-index/
-tmp/
+
+index/*
+!index/.gitkeep
+
+spimi_index/*
+!spimi_index/.gitkeep
+
+tmp/*
+!tmp/.gitkeep
