@@ -8,7 +8,11 @@ import math
 from index import InvertedIndexReader, InvertedIndexWriter
 from util import IdMap, sorted_merge_posts_and_tfs
 from compression import StandardPostings, VBEPostings
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(iterable):
+        return iterable
 
 class BSBIIndex:
     """
@@ -220,6 +224,67 @@ class BSBIIndex:
                             scores[doc_id] += math.log(N / df) * (1 + math.log(tf))
 
             # Top-K
+            docs = [(score, self.doc_id_map[doc_id]) for (doc_id, score) in scores.items()]
+            return sorted(docs, key = lambda x: x[0], reverse = True)[:k]
+
+    def retrieve_bm25(self, query, k = 10, k1 = 1.2, b = 0.75):
+        """
+        Melakukan Ranked Retrieval dengan skema BM25 menggunakan pendekatan TaaT.
+
+        Score = sum_t IDF(t) * ((tf(t, D) * (k1 + 1)) /
+                (tf(t, D) + k1 * (1 - b + b * dl / avgdl)))
+
+        dengan IDF(t) = log((N - df(t) + 0.5) / (df(t) + 0.5))
+
+        Parameters
+        ----------
+        query: str
+            Query tokens yang dipisahkan oleh spasi
+        k: int
+            Banyaknya dokumen yang dikembalikan
+        k1: float
+            Parameter BM25 untuk mengontrol saturasi TF
+        b: float
+            Parameter BM25 untuk normalisasi panjang dokumen
+
+        Result
+        ------
+        List[(float, str)]
+            List of tuple: elemen pertama adalah score similarity, dan yang
+            kedua adalah nama dokumen. Daftar Top-K dokumen terurut mengecil
+            berdasarkan skor.
+        """
+        if len(self.term_id_map) == 0 or len(self.doc_id_map) == 0:
+            self.load()
+
+        query_terms = [self.term_id_map.str_to_id[word]
+                       for word in query.split()
+                       if word in self.term_id_map.str_to_id]
+
+        with InvertedIndexReader(self.index_name, self.postings_encoding, directory=self.output_dir) as merged_index:
+            N = len(merged_index.doc_length)
+            avgdl = merged_index.avg_doc_length
+            if N == 0 or avgdl == 0:
+                return []
+
+            scores = {}
+            for term in query_terms:
+                if term not in merged_index.postings_dict:
+                    continue
+
+                df = merged_index.postings_dict[term][1]
+                postings, tf_list = merged_index.get_postings_list(term)
+                idf = math.log((N - df + 0.5) / (df + 0.5))
+
+                for i in range(len(postings)):
+                    doc_id, tf = postings[i], tf_list[i]
+                    dl = merged_index.doc_length[doc_id]
+                    denominator = tf + k1 * (1 - b + b * dl / avgdl)
+                    score = idf * ((tf * (k1 + 1)) / denominator)
+                    if doc_id not in scores:
+                        scores[doc_id] = 0
+                    scores[doc_id] += score
+
             docs = [(score, self.doc_id_map[doc_id]) for (doc_id, score) in scores.items()]
             return sorted(docs, key = lambda x: x[0], reverse = True)[:k]
 

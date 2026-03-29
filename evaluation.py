@@ -53,11 +53,9 @@ def load_qrels(qrel_file = "qrels.txt", max_q_id = 30, max_doc_id = 1033):
 
 ######## >>>>> EVALUASI !
 
-def eval(qrels, query_file = "queries.txt", k = 1000):
-  """ 
-    loop ke semua 30 query, hitung score di setiap query,
-    lalu hitung MEAN SCORE over those 30 queries.
-    untuk setiap query, kembalikan top-1000 documents
+def _eval_with_retriever(qrels, retrieve_fn, label, query_file = "queries.txt", k = 1000):
+  """
+    Helper internal untuk mengevaluasi satu metode retrieval terhadap semua query.
   """
   BSBI_instance = BSBIIndex(data_dir = 'collection', \
                           postings_encoding = VBEPostings, \
@@ -73,13 +71,43 @@ def eval(qrels, query_file = "queries.txt", k = 1000):
       # HATI-HATI, doc id saat indexing bisa jadi berbeda dengan doc id
       # yang tertera di qrels
       ranking = []
-      for (score, doc) in BSBI_instance.retrieve_tfidf(query, k = k):
+      for (score, doc) in retrieve_fn(BSBI_instance, query, k):
           did = int(re.search(r'\/.*\/.*\/(.*)\.txt', doc).group(1))
           ranking.append(qrels[qid][did])
       rbp_scores.append(rbp(ranking))
 
-  print("Hasil evaluasi TF-IDF terhadap 30 queries")
+  print(f"Hasil evaluasi {label} terhadap 30 queries")
   print("RBP score =", sum(rbp_scores) / len(rbp_scores))
+
+def eval_tfidf(qrels, query_file = "queries.txt", k = 1000):
+  """
+    Evaluasi TF-IDF terhadap seluruh query.
+  """
+  _eval_with_retriever(
+      qrels,
+      lambda bsbi, query, k: bsbi.retrieve_tfidf(query, k = k),
+      "TF-IDF",
+      query_file = query_file,
+      k = k
+  )
+
+def eval_bm25(qrels, query_file = "queries.txt", k = 1000):
+  """
+    Evaluasi BM25 terhadap seluruh query.
+  """
+  _eval_with_retriever(
+      qrels,
+      lambda bsbi, query, k: bsbi.retrieve_bm25(query, k = k),
+      "BM25",
+      query_file = query_file,
+      k = k
+  )
+
+def eval(qrels, query_file = "queries.txt", k = 1000):
+  """
+    Backward-compatible alias untuk evaluasi TF-IDF.
+  """
+  eval_tfidf(qrels, query_file = query_file, k = k)
 
 if __name__ == '__main__':
   qrels = load_qrels()
@@ -87,4 +115,6 @@ if __name__ == '__main__':
   assert qrels["Q1"][166] == 1, "qrels salah"
   assert qrels["Q1"][300] == 0, "qrels salah"
 
-  eval(qrels)
+  eval_tfidf(qrels)
+  print()
+  eval_bm25(qrels)
