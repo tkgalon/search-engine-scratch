@@ -121,3 +121,36 @@ The implementation was verified by checking that:
 
 - `retrieve_bm25(...)` and `retrieve_bm25_wand(...)` return the same top-k results
 - WAND uses the extra metadata stored in the inverted index
+
+# Add-ons Features
+
+## 5. SPIMI Indexing Mode
+
+Besides the main BSBI pipeline, the project now also includes a standalone SPIMI-based indexing mode in `spimi.py` through the `SPIMIIndex` class.
+
+This class inherits from `BSBIIndex`, but overrides the indexing process so that each block is inverted directly into an in-memory dictionary without first building a large `td_pairs` list. For each block, the implementation:
+
+- reads documents one by one
+- maps each token into a `term_id`
+- updates an in-memory structure of the form `term_id -> {doc_id: tf}`
+- writes the intermediate index in sorted term order
+
+After all blocks are processed, the intermediate indices are merged into a final index with the same format as the regular BSBI pipeline.
+
+Because of this design, the SPIMI output remains compatible with:
+
+- `InvertedIndexReader`
+- `retrieve_tfidf(...)`
+- `retrieve_bm25(...)`
+- `retrieve_bm25_wand(...)`
+
+The SPIMI index is stored separately in `spimi_index/`, so it does not interfere with the main required implementation in `index/`.
+
+An additional demo script, `search_spimi.py`, was also added to test retrieval on the SPIMI-built index.
+
+The implementation was verified by checking that:
+
+- `python3 spimi.py` successfully builds the SPIMI index
+- the resulting index still stores `doc_length`, `avg_doc_length`, and `max_tf_in_list`
+- retrieval results from SPIMI are consistent with the existing BSBI-based pipeline
+- evaluation scores on the SPIMI index remain the same as the regular index
