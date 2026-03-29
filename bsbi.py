@@ -4,6 +4,7 @@ import contextlib
 import heapq
 import time
 import math
+import bisect
 
 from index import InvertedIndexReader, InvertedIndexWriter
 from util import IdMap, sorted_merge_posts_and_tfs
@@ -234,7 +235,7 @@ class BSBIIndex:
         Score = sum_t IDF(t) * ((tf(t, D) * (k1 + 1)) /
                 (tf(t, D) + k1 * (1 - b + b * dl / avgdl)))
 
-        dengan IDF(t) = log((N - df(t) + 0.5) / (df(t) + 0.5))
+        dengan IDF(t) = log(1 + ((N - df(t) + 0.5) / (df(t) + 0.5)))
 
         Parameters
         ----------
@@ -287,6 +288,120 @@ class BSBIIndex:
 
             docs = [(score, self.doc_id_map[doc_id]) for (doc_id, score) in scores.items()]
             return sorted(docs, key = lambda x: x[0], reverse = True)[:k]
+
+    def retrieve_bm25_wand(self, query, k = 10, k1 = 1.2, b = 0.75):
+        """
+        Melakukan Top-K retrieval BM25 dengan algoritma WAND.
+
+        WAND menggunakan upper bound score per term untuk menghindari
+        perhitungan skor BM25 penuh pada semua dokumen kandidat.
+
+        Parameters
+        ----------
+        query: str
+            Query tokens yang dipisahkan oleh spasi
+        k: int
+            Banyaknya dokumen yang dikembalikan
+        k1: float
+            Parameter BM25 untuk mengontrol saturasi TF
+        b: float
+            Parameter BM25 untuk normalisasi panjang dokumen
+
+        Result
+        ------
+        List[(float, str)]
+            List of tuple: elemen pertama adalah score similarity, dan yang
+            kedua adalah nama dokumen. Daftar Top-K dokumen terurut mengecil
+            berdasarkan skor.
+        """
+        if len(self.term_id_map) == 0 or len(self.doc_id_map) == 0:
+            self.load()
+
+        query_terms = [self.term_id_map.str_to_id[word]
+                       for word in query.split()
+                       if word in self.term_id_map.str_to_id]
+
+        with InvertedIndexReader(self.index_name, self.postings_encoding, directory=self.output_dir) as merged_index:
+            N = len(merged_index.doc_length)
+            avgdl = merged_index.avg_doc_length
+            if N == 0 or avgdl == 0:
+                return []
+
+            cursors = []
+            for term in query_terms:
+                if term not in merged_index.postings_dict:
+                    continue
+
+                df = merged_index.postings_dict[term][1]
+                max_tf = merged_index.postings_dict[term][4]
+                postings, tf_list = merged_index.get_postings_list(term)
+                if len(postings) == 0:
+                    continue
+
+                idf = math.log(1 + ((N - df + 0.5) / (df + 0.5)))
+                upper_bound = idf * ((max_tf * (k1 + 1)) / (max_tf + k1 * (1 - b)))
+                cursors.append({
+                    "term": term,
+                    "postings": postings,
+                    "tf_list": tf_list,
+                    "idf": idf,
+                    "upper_bound": upper_bound,
+                    "pos": 0,
+                })
+
+            if len(cursors) == 0:
+                return []
+
+            top_k = []
+            threshold = 0.0
+
+            while True:
+                active = [cursor for cursor in cursors if cursor["pos"] < len(cursor["postings"])]
+                if len(active) == 0:
+                    break
+
+                active.sort(key = lambda cursor: cursor["postings"][cursor["pos"]])
+                upper_bound_sum = 0.0
+                pivot_idx = None
+                pivot_doc = None
+
+                for i, cursor in enumerate(active):
+                    upper_bound_sum += cursor["upper_bound"]
+                    if upper_bound_sum > threshold:
+                        pivot_idx = i
+                        pivot_doc = cursor["postings"][cursor["pos"]]
+                        break
+
+                if pivot_idx is None:
+                    break
+
+                smallest_doc = active[0]["postings"][active[0]["pos"]]
+                if smallest_doc == pivot_doc:
+                    candidate_doc = pivot_doc
+                    score = 0.0
+
+                    for cursor in active:
+                        if cursor["postings"][cursor["pos"]] == candidate_doc:
+                            tf = cursor["tf_list"][cursor["pos"]]
+                            dl = merged_index.doc_length[candidate_doc]
+                            denominator = tf + k1 * (1 - b + b * dl / avgdl)
+                            score += cursor["idf"] * ((tf * (k1 + 1)) / denominator)
+                            cursor["pos"] += 1
+
+                    if len(top_k) < k:
+                        heapq.heappush(top_k, (score, candidate_doc))
+                    elif score > top_k[0][0]:
+                        heapq.heapreplace(top_k, (score, candidate_doc))
+
+                    if len(top_k) == k:
+                        threshold = top_k[0][0]
+                else:
+                    for cursor in active[:pivot_idx]:
+                        postings = cursor["postings"]
+                        cursor["pos"] = bisect.bisect_left(postings, pivot_doc, cursor["pos"])
+
+            docs = [(score, self.doc_id_map[doc_id]) for (score, doc_id) in top_k]
+            return sorted(docs, key = lambda x: x[0], reverse = True)
 
     def index(self):
         """
