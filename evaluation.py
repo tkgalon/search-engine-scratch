@@ -1,4 +1,5 @@
 import re
+import math
 from bsbi import BSBIIndex
 from compression import VBEPostings
 
@@ -27,6 +28,43 @@ def rbp(ranking, p = 0.8):
     pos = i - 1
     score += ranking[pos] * (p ** (i - 1))
   return (1 - p) * score
+
+def dcg(ranking):
+  """
+    Menghitung Discounted Cumulative Gain (DCG) dari ranking biner.
+  """
+  score = 0.
+  for i in range(1, len(ranking) + 1):
+    rel_i = ranking[i - 1]
+    score += rel_i / math.log2(i + 1)
+  return score
+
+def ndcg(ranking):
+  """
+    Menghitung Normalized Discounted Cumulative Gain (NDCG) dari ranking biner.
+  """
+  actual_dcg = dcg(ranking)
+  ideal_ranking = sorted(ranking, reverse = True)
+  ideal_dcg = dcg(ideal_ranking)
+  if ideal_dcg == 0:
+    return 0.
+  return actual_dcg / ideal_dcg
+
+def ap(ranking):
+  """
+    Menghitung Average Precision (AP) dari ranking biner.
+  """
+  num_relevant = 0
+  precision_sum = 0.
+
+  for i in range(1, len(ranking) + 1):
+    if ranking[i - 1] == 1:
+      num_relevant += 1
+      precision_sum += num_relevant / i
+
+  if num_relevant == 0:
+    return 0.
+  return precision_sum / num_relevant
 
 
 ######## >>>>> memuat qrels
@@ -63,6 +101,9 @@ def _eval_with_retriever(qrels, retrieve_fn, label, query_file = "queries.txt", 
 
   with open(query_file) as file:
     rbp_scores = []
+    dcg_scores = []
+    ndcg_scores = []
+    ap_scores = []
     for qline in file:
       parts = qline.strip().split()
       qid = parts[0]
@@ -75,9 +116,15 @@ def _eval_with_retriever(qrels, retrieve_fn, label, query_file = "queries.txt", 
           did = int(re.search(r'\/.*\/.*\/(.*)\.txt', doc).group(1))
           ranking.append(qrels[qid][did])
       rbp_scores.append(rbp(ranking))
+      dcg_scores.append(dcg(ranking))
+      ndcg_scores.append(ndcg(ranking))
+      ap_scores.append(ap(ranking))
 
   print(f"Hasil evaluasi {label} terhadap 30 queries")
   print("RBP score =", sum(rbp_scores) / len(rbp_scores))
+  print("DCG score =", sum(dcg_scores) / len(dcg_scores))
+  print(f"NDCG@{k} score =", sum(ndcg_scores) / len(ndcg_scores))
+  print("AP score =", sum(ap_scores) / len(ap_scores))
 
 def eval_tfidf(qrels, query_file = "queries.txt", k = 1000):
   """
@@ -114,6 +161,11 @@ if __name__ == '__main__':
 
   assert qrels["Q1"][166] == 1, "qrels salah"
   assert qrels["Q1"][300] == 0, "qrels salah"
+  assert abs(dcg([1, 0, 1, 1]) - (1 / math.log2(2) + 1 / math.log2(4) + 1 / math.log2(5))) < 1e-9, "dcg salah"
+  assert ndcg([1, 1, 1]) == 1.0, "ndcg salah"
+  assert ndcg([0, 0, 0]) == 0.0, "ndcg salah"
+  assert ap([0, 0, 0]) == 0.0, "ap salah"
+  assert abs(ap([1, 0, 1, 1]) - ((1 / 1) + (2 / 3) + (3 / 4)) / 3) < 1e-9, "ap salah"
 
   eval_tfidf(qrels)
   print()
