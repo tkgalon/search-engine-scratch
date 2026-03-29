@@ -154,3 +154,48 @@ The implementation was verified by checking that:
 - the resulting index still stores `doc_length`, `avg_doc_length`, and `max_tf_in_list`
 - retrieval results from SPIMI are consistent with the existing BSBI-based pipeline
 - evaluation scores on the SPIMI index remain the same as the regular index
+
+## 6. Trie-Based Dictionary and Autocomplete
+
+The project also supports prefix-based interaction through a Trie-backed vocabulary structure. This feature is used to generate term suggestions and query completions from incomplete input.
+
+To make the suggestions more useful, the Trie implementation also includes:
+
+- normalized prefix matching
+- cached top suggestions at each node
+- ranking based on term strength in the collection, instead of simple alphabetical traversal
+
+This feature was integrated into `BSBIIndex` through:
+
+- `autocomplete(prefix, k=10)`
+- `autocomplete_query(query, k=10)`
+
+An additional demo script, `autocomplete.py`, was added to show how the feature works directly on the indexed collection.
+
+### Demo Output
+
+Example term autocomplete:
+
+```text
+Prefix : preg
+['pregnancy', 'pregnant', 'pregnanediol', 'pregnanetriol', 'preg-', 'preganediol', 'pregnancies.']
+
+Prefix : meta
+['metabolism', 'metabolic', 'metastases', 'metastatic', 'metal', 'metabolites', 'metastasis', 'metals', 'metaphase', 'metabolize']
+```
+
+Example query autocomplete:
+
+```text
+Query  : lipid meta
+['lipid metabolism', 'lipid metabolic', 'lipid metastases', 'lipid metastatic', 'lipid metal', 'lipid metabolites', 'lipid metastasis', 'lipid metals', 'lipid metaphase', 'lipid metabolize']
+
+Query  : psychodr
+['psychodrama']
+```
+
+The implementation was verified by checking that:
+
+- Trie-based suggestions are returned correctly for term prefixes and incomplete queries
+- the autocomplete feature works on top of the indexed vocabulary
+- the existing required retrieval features remain unchanged

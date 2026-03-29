@@ -9,6 +9,7 @@ import bisect
 from index import InvertedIndexReader, InvertedIndexWriter
 from util import IdMap, sorted_merge_posts_and_tfs
 from compression import StandardPostings, VBEPostings
+from trie import Trie, normalize_term
 try:
     from tqdm import tqdm
 except ImportError:
@@ -38,6 +39,7 @@ class BSBIIndex:
 
         # Untuk menyimpan nama-nama file dari semua intermediate inverted index
         self.intermediate_indices = []
+        self.term_trie = None
 
     def save(self):
         """Menyimpan doc_id_map and term_id_map ke output directory via pickle"""
@@ -54,6 +56,105 @@ class BSBIIndex:
             self.term_id_map = pickle.load(f)
         with open(os.path.join(self.output_dir, 'docs.dict'), 'rb') as f:
             self.doc_id_map = pickle.load(f)
+        self.term_trie = None
+
+    def build_term_trie(self):
+        """
+        Membangun Trie dari seluruh term yang ada pada term_id_map.
+        Trie dibangun secara lazy dan menyimpan cached top suggestions
+        berdasarkan document frequency agar autocomplete lebih berguna.
+        """
+        if len(self.term_id_map) == 0:
+            self.load()
+
+        aggregated_terms = {}
+        with InvertedIndexReader(self.index_name, self.postings_encoding, directory=self.output_dir) as merged_index:
+            for term_id, term in enumerate(self.term_id_map.id_to_str):
+                normalized_term = normalize_term(term)
+                if not normalized_term or term_id not in merged_index.postings_dict:
+                    continue
+
+                df = merged_index.postings_dict[term_id][1]
+                is_clean_surface = term.isalnum()
+
+                if normalized_term not in aggregated_terms:
+                    aggregated_terms[normalized_term] = {
+                        "display": term,
+                        "display_rank": (1 if is_clean_surface else 0, df, -len(term), term),
+                        "score": df,
+                    }
+                else:
+                    aggregated_terms[normalized_term]["score"] += df
+                    candidate_rank = (1 if is_clean_surface else 0, df, -len(term), term)
+                    if candidate_rank > aggregated_terms[normalized_term]["display_rank"]:
+                        aggregated_terms[normalized_term]["display"] = term
+                        aggregated_terms[normalized_term]["display_rank"] = candidate_rank
+
+        trie = Trie()
+        for normalized_term, metadata in aggregated_terms.items():
+            trie.insert(normalized_term, metadata["display"], metadata["score"])
+        self.term_trie = trie
+        return trie
+
+    def autocomplete(self, prefix, k = 10):
+        """
+        Mengembalikan daftar term yang memiliki prefix tertentu.
+
+        Parameters
+        ----------
+        prefix: str
+            Prefix term yang ingin dilengkapi
+        k: int
+            Maksimum jumlah suggestion yang dikembalikan
+
+        Result
+        ------
+        List[str]
+            Daftar term hasil autocomplete secara leksikografis.
+        """
+        if prefix is None:
+            return []
+
+        prefix = prefix.strip()
+        if len(prefix) == 0:
+            return []
+
+        if self.term_trie is None:
+            self.build_term_trie()
+        return self.term_trie.autocomplete(prefix, limit = k)
+
+    def autocomplete_query(self, query, k = 10):
+        """
+        Mengembalikan saran autocomplete untuk token terakhir pada query.
+
+        Parameters
+        ----------
+        query: str
+            Query yang mungkin belum lengkap
+        k: int
+            Maksimum jumlah suggestion yang dikembalikan
+
+        Result
+        ------
+        List[str]
+            Daftar query lengkap hasil autocomplete.
+        """
+        if query is None:
+            return []
+
+        stripped_query = query.strip()
+        if len(stripped_query) == 0:
+            return []
+
+        parts = stripped_query.split()
+        prefix = parts[-1]
+        prefix_suggestions = self.autocomplete(prefix, k = k)
+
+        if len(parts) == 1:
+            return prefix_suggestions
+
+        query_prefix = " ".join(parts[:-1])
+        return [query_prefix + " " + suggestion for suggestion in prefix_suggestions]
 
     def parse_block(self, block_dir_relative):
         """
