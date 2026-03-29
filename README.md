@@ -1,5 +1,91 @@
 # Search Engine From Scratch
 
+This project implements a search engine from scratch with BSBI and SPIMI indexing pipelines. It supports multiple ranking methods (TF-IDF, BM25, BM25 WAND), evaluation metrics (RBP, DCG, NDCG, AP), Elias-Gamma compression for efficient storage, and Trie-based autocomplete for query suggestions.
+
+## Project Structure
+
+```text
+├── collection/              # document collection
+├── index/                   # BSBI-based index output
+├── spimi_index/             # SPIMI-based index output
+├── tmp/                     # temporary directory
+├── bsbi.py                  # BSBI indexing and retrieval
+├── spimi.py                 # SPIMI indexing mode
+├── search.py                # retrieval demo using BSBI index
+├── search_spimi.py          # retrieval demo using SPIMI index
+├── evaluation.py            # evaluation script
+├── compression.py           # postings compression methods
+├── index.py                 # inverted index reader/writer
+├── trie.py                  # Trie implementation for autocomplete
+├── autocomplete.py          # autocomplete demo
+├── util.py                  # helper utilities
+├── queries.txt              # query set
+└── qrels.txt                # relevance judgments
+```
+
+## How to Run
+
+Run every command from the project root directory.
+
+### Main Features
+
+```bash
+python3 compression.py
+```
+
+Runs a small encode/decode demo for `StandardPostings`, `VBEPostings`, and `EliasGammaPostings`.
+
+```bash
+python3 bsbi.py
+```
+
+Builds the main inverted index in `index/` using the BSBI pipeline.
+
+```bash
+python3 search.py
+```
+
+Runs retrieval examples on the BSBI index using:
+
+- TF-IDF
+- BM25
+- BM25 WAND
+
+```bash
+python3 evaluation.py
+```
+
+Evaluates TF-IDF and BM25 using:
+
+- RBP
+- DCG
+- NDCG
+- AP
+
+### Add-ons Features
+
+```bash
+python3 spimi.py
+```
+
+Builds a separate inverted index in `spimi_index/` using the SPIMI pipeline.
+
+```bash
+python3 search_spimi.py
+```
+
+Runs retrieval examples on the SPIMI-built index using:
+
+- TF-IDF
+- BM25
+- BM25 WAND
+
+```bash
+python3 autocomplete.py
+```
+
+Runs the Trie-based autocomplete demo for both term completion and query completion.
+
 # Implemented Features
 
 ## 1. Elias-Gamma Bit-Level Compression
