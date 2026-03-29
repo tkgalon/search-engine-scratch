@@ -274,7 +274,7 @@ class BSBIIndex:
 
                 df = merged_index.postings_dict[term][1]
                 postings, tf_list = merged_index.get_postings_list(term)
-                idf = math.log((N - df + 0.5) / (df + 0.5))
+                idf = math.log(1 + ((N - df + 0.5) / (df + 0.5)))
 
                 for i in range(len(postings)):
                     doc_id, tf = postings[i], tf_list[i]
