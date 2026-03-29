@@ -237,11 +237,147 @@ class VBEPostings:
         """
         return VBEPostings.vb_decode(encoded_tf_list)
 
+class EliasGammaPostings:
+    """
+    Postings codec berbasis Elias-Gamma.
+
+    Seperti VBEPostings, postings disimpan sebagai gap-based list. Elias-Gamma
+    hanya mendukung integer positif, sehingga gap pertama diberi offset +1 saat
+    encoding karena docID pertama bisa bernilai 0.
+    """
+
+    @staticmethod
+    def gamma_encode_number(number):
+        """
+        Encode satu integer positif menggunakan Elias-Gamma coding.
+        """
+        if number <= 0:
+            raise ValueError("Elias-Gamma hanya mendukung integer positif")
+
+        binary = format(number, 'b')
+        prefix = '0' * (len(binary) - 1)
+        return prefix + binary
+
+    @staticmethod
+    def _pack_bits(bitstring):
+        """
+        Ubah string bit menjadi bytes dengan padding 0 di byte terakhir.
+        """
+        if not bitstring:
+            return b""
+
+        padded_bitstring = bitstring + ('0' * ((8 - len(bitstring) % 8) % 8))
+        return bytes(
+            int(padded_bitstring[i:i + 8], 2)
+            for i in range(0, len(padded_bitstring), 8)
+        )
+
+    @staticmethod
+    def _unpack_bits(encoded_bytestream):
+        """
+        Ubah bytes menjadi string bit.
+        """
+        if not encoded_bytestream:
+            return ""
+
+        return ''.join(format(byte, '08b') for byte in encoded_bytestream)
+
+    @staticmethod
+    def gamma_encode(list_of_numbers):
+        """
+        Encode list of positive integers menjadi bytes Elias-Gamma.
+        """
+        bitstring = ''.join(
+            EliasGammaPostings.gamma_encode_number(number)
+            for number in list_of_numbers
+        )
+        return EliasGammaPostings._pack_bits(bitstring)
+
+    @staticmethod
+    def gamma_decode(encoded_bytestream):
+        """
+        Decode bytes Elias-Gamma menjadi list of integers.
+
+        Jika sisa bit hanya padding dan tidak cukup membentuk codeword lengkap,
+        decoder berhenti tanpa melempar exception.
+        """
+        bits = EliasGammaPostings._unpack_bits(encoded_bytestream)
+        if not bits:
+            return []
+
+        numbers = []
+        i = 0
+        n_bits = len(bits)
+
+        while i < n_bits:
+            zero_count = 0
+            while i + zero_count < n_bits and bits[i + zero_count] == '0':
+                zero_count += 1
+
+            first_one_pos = i + zero_count
+            if first_one_pos >= n_bits:
+                break
+
+            end_pos = first_one_pos + zero_count + 1
+            if end_pos > n_bits:
+                break
+
+            numbers.append(int(bits[first_one_pos:end_pos], 2))
+            i = end_pos
+
+        return numbers
+
+    @staticmethod
+    def encode(postings_list):
+        """
+        Encode postings list dengan Elias-Gamma setelah diubah ke gap-based list.
+        Gap pertama di-offset +1 agar docID pertama dapat bernilai 0.
+        """
+        if not postings_list:
+            return b""
+
+        gap_postings_list = [postings_list[0] + 1]
+        for i in range(1, len(postings_list)):
+            gap_postings_list.append(postings_list[i] - postings_list[i - 1])
+
+        return EliasGammaPostings.gamma_encode(gap_postings_list)
+
+    @staticmethod
+    def encode_tf(tf_list):
+        """
+        Encode TF list dengan Elias-Gamma. Seluruh TF harus positif.
+        """
+        return EliasGammaPostings.gamma_encode(tf_list)
+
+    @staticmethod
+    def decode(encoded_postings_list):
+        """
+        Decode postings list Elias-Gamma dari representasi gap-based.
+        """
+        decoded_gap_postings = EliasGammaPostings.gamma_decode(encoded_postings_list)
+        if not decoded_gap_postings:
+            return []
+
+        total = decoded_gap_postings[0] - 1
+        original_postings_list = [total]
+        for gap in decoded_gap_postings[1:]:
+            total += gap
+            original_postings_list.append(total)
+
+        return original_postings_list
+
+    @staticmethod
+    def decode_tf(encoded_tf_list):
+        """
+        Decode TF list Elias-Gamma.
+        """
+        return EliasGammaPostings.gamma_decode(encoded_tf_list)
+
 if __name__ == '__main__':
     
     postings_list = [34, 67, 89, 454, 2345738]
     tf_list = [12, 10, 3, 4, 1]
-    for Postings in [StandardPostings, VBEPostings]:
+    for Postings in [StandardPostings, VBEPostings, EliasGammaPostings]:
         print(Postings.__name__)
         encoded_postings_list = Postings.encode(postings_list)
         encoded_tf_list = Postings.encode_tf(tf_list)
