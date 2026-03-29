@@ -104,3 +104,20 @@ AP score = 0.5144200180617612
 ```
 
 Based on these results, BM25 outperforms TF-IDF on all reported evaluation metrics in the current implementation.
+
+## 4. WAND Top-K Retrieval for BM25
+
+BM25 retrieval was further extended with a WAND-based top-k method, implemented as `retrieve_bm25_wand(...)` in `bsbi.py`.
+
+Instead of scoring every candidate document fully, this method uses per-term upper bounds to skip documents that are unlikely to appear in the final top-k results.
+
+To support this, the inverted index metadata in `index.py` was also adjusted. In addition to the previous metadata, each term now stores:
+
+- `max_tf_in_list`
+
+This value is used to estimate an upper bound contribution of a term to the BM25 score, which is then used during WAND pivot selection and pruning.
+
+The implementation was verified by checking that:
+
+- `retrieve_bm25(...)` and `retrieve_bm25_wand(...)` return the same top-k results
+- WAND uses the extra metadata stored in the inverted index
